@@ -196,7 +196,6 @@ ospfs_inode_blockno(ospfs_inode_t *oi, uint32_t offset)
 		return oi->oi_direct[blockno];
 }
 
-
 // ospfs_inode_data(oi, offset)
 //	Use this function to load part of inode's data from "disk",
 //	where 'offset' is relative to the first byte of inode data.
