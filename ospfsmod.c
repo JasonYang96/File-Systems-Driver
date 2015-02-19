@@ -552,11 +552,13 @@ static uint32_t
 allocate_block(void)
 {
 	/* EXERCISE: Your code here */
+	uint32_t k = (ospfs_super->os_firstinob + ospfs_super->os_ninodes);
+
 	//loads bitmap block
-	void* bitmap = ospfs_block(OSPFS_FREEMAP_BLK);
+	void *bitmap = ospfs_block(OSPFS_FREEMAP_BLK);
 
 	//go through bitmap until find a bit that is 1, return bit number
-	for (uint32_t k = (super->os_firstinob + super->os_ninodes); k < super->os_nblocks; k++)
+	for (; k < ospfs_super->os_nblocks; k++)
 	{
 		if(bitvector_test(bitmap, k))
 		{
@@ -589,7 +591,7 @@ free_block(uint32_t blockno)
 	/* EXERCISE: Your code here */
 
 	//check valid blockno
-	if (blockno < (super->os_firstinob + super->os_ninodes) || blockno > super->os_nblocks)
+	if (blockno < (ospfs_super->os_firstinob + ospfs_super->os_ninodes) || blockno > ospfs_super->os_nblocks)
 	{
 		eprintk("Tried to free invalid blockno %u", blockno);
 		return;
