@@ -428,6 +428,8 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	int r = 0;		/* Error return value, if any */
 	int ok_so_far = 0;	/* Return value from 'filldir' */
 
+	uint32_t offset = (f_pos - 2) * OSPFS_DIRENTRY_SIZE;
+
 	// f_pos is an offset into the directory's data, plus two.
 	// The "plus two" is to account for "." and "..".
 	if (r == 0 && f_pos == 0) {
@@ -444,15 +446,20 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 
 	// actual entries
 	while (r == 0 && ok_so_far >= 0 && f_pos >= 2) {
-		ospfs_direntry_t *od;
-		ospfs_inode_t *entry_oi;
+		ospfs_direntry_t *od = ospfs_inode_data(dir_oi, offset);
+		ospfs_inode_t *entry_oi = ospfs_inode(od->od_ino);
+		int ftype;
 
 		/* If at the end of the directory, set 'r' to 1 and exit
 		 * the loop.  For now we do this all the time.
 		 *
 		 * EXERCISE: Your code here */
-		r = 1;		/* Fix me! */
-		break;		/* Fix me! */
+		if (offset >= dir_oi->oi_size)
+		{
+			r = 1;
+			eprintk("@end of dir\n");
+			break;
+		}
 
 		/* Get a pointer to the next entry (od) in the directory.
 		 * The file system interprets the contents of a
@@ -475,6 +482,44 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		 */
 
 		/* EXERCISE: Your code here */
+
+		//check if dir is empty
+		if (entry_oi == NULL || od->od_ino == 0)
+		{
+			f_pos++;
+			eprintk("dir is empty\n");
+			continue;
+		}
+
+		switch (entry_oi->oi_ftype)
+		{
+			//file
+			case OSPFS_FTYPE_REG:
+				ftype = DT_REG;
+				eprintk("ftype reg\n");
+				break;
+
+			//dir	
+			case OSPFS_FTYPE_DIR:
+				ftype = DT_DIR;
+				eprintk("ftype dir\n");
+				break;
+
+			//sym link
+			case OSPFS_FTYPE_SYMLINK:
+				ftype = DT_LNK;
+				eprintk("ftype symlink\n");
+				break;
+
+			default:
+				eprintk("Error reading file type\n");
+				r = 3;
+				break;
+		}
+
+		//update ok_so_far
+		ok_so_far = filldir(dirent, od->od_name, strlen(od->od_name), f_pos, od->od_ino, ftype);
+		f_pos++;
 	}
 
 	// Save the file position and return!
@@ -943,15 +988,24 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
 	// Support files opened with the O_APPEND flag.  To detect O_APPEND,
 	// use struct file's f_flags field and the O_APPEND bit.
 	/* EXERCISE: Your code here */
+	if (filp->f_flags & O_APPEND)
+	{
+		*f_pos = oi->oi_size;
+	}
 
 	// If the user is writing past the end of the file, change the file's
 	// size to accomodate the request.  (Use change_size().)
 	/* EXERCISE: Your code here */
+	if (*f_pos + count >= oi->oi_size)
+	{
+		change_size(oi, *f_pos + count);
+	}
 
 	// Copy data block by block
 	while (amount < count && retval >= 0) {
 		uint32_t blockno = ospfs_inode_blockno(oi, *f_pos);
-		uint32_t n;
+		uint32_t offset = *f_pos % OSPFS_BLKSIZE;
+        uint32_t n = OSPFS_BLKSIZE - offset;
 		char *data;
 
 		if (blockno == 0) {
@@ -966,8 +1020,13 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
 		// read user space.
 		// Keep track of the number of bytes moved in 'n'.
 		/* EXERCISE: Your code here */
-		retval = -EIO; // Replace these lines
-		goto done;
+
+		if (n > count - amount)
+			n = count - amount;
+        
+        if (copy_to_user(data + offset, buffer, n) != 0) {
+            return -EFAULT;
+        }
 
 		buffer += n;
 		amount += n;
