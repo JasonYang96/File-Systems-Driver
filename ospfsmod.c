@@ -873,7 +873,7 @@ ospfs_read(struct file *filp, char __user *buffer, size_t count, loff_t *f_pos)
 	// Change 'count' so we never read past the end of the file.
 	/* EXERCISE: Your code here */
 
-	if (oi->oi_size < *f_pos + count)
+	if (*f_pos + count > oi->oi_size)
         count = oi->oi_size - *f_pos;
     else if (oi->oi_size <= *f_pos)
         count = 0;
@@ -900,9 +900,9 @@ ospfs_read(struct file *filp, char __user *buffer, size_t count, loff_t *f_pos)
 		/* EXERCISE: Your code here */
 
 		if (n > count - amount)
-		n = count - amount;
+			n = count - amount;
         
-        if (copy_to_user(buffer, data+offset, n) != 0) {
+        if (copy_to_user(buffer, data + offset, n) != 0) {
             return -EFAULT;
         }
 
