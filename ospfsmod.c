@@ -1097,15 +1097,37 @@ find_direntry(ospfs_inode_t *dir_oi, const char *name, int namelen)
 static ospfs_direntry_t *
 create_blank_direntry(ospfs_inode_t *dir_oi)
 {
-	// Outline:
-	// 1. Check the existing directory data for an empty entry.  Return one
-	//    if you find it.
-	// 2. If there's no empty entries, add a block to the directory.
-	//    Use ERR_PTR if this fails; otherwise, clear out all the directory
-	//    entries and return one of them.
-
-	/* EXERCISE: Your code here. */
-	return ERR_PTR(-EINVAL); // Replace this line
+    // Outline:
+    // 1. Check the existing directory data for an empty entry.  Return one
+    //    if you find it.
+    // 2. If there's no empty entries, add a block to the directory.
+    //    Use ERR_PTR if this fails; otherwise, clear out all the directory
+    //    entries and return one of them.
+    
+    /* EXERCISE: Your code here. */
+    ospfs_direntry_t *od;
+    int k;
+    // Check the existing directory data for an empty entry.
+    for (k = 0; k < dir_oi->oi_size; k += OSPFS_DIRENTRY_SIZE) {
+        od = ospfs_inode_data(dir_oi, k);
+        // Return the empty entry
+        //    if you find it.
+        if (od->od_ino == 0)
+            return od;
+    }
+    
+    // If there's no empty entries, add a block to the directory.
+    uint32_t size = OSPFS_BLKSIZE * (ospfs_size2nblocks(dir_oi->oi_size) + 1);
+    int val = change_size(dir_oi, size);
+    // Use ERR_PTR if this fails;
+    if (val != 0)
+        return ERR_PRT(val);
+    
+    dir_oi->oi_size = size;
+    
+    // Otherwise, clear out all the directory
+    //    entries and return one of them.
+    return ospfs_inode_data(dir_oi, OSPFS_DIRENTRY_SIZE + k);
 }
 
 // ospfs_link(src_dentry, dir, dst_dentry
