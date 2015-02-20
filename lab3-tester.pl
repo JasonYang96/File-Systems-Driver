@@ -7,14 +7,17 @@ close FOO;
 
 @tests = (
     # test reading
+    #test 1
     [ 'diff base/hello.txt test/hello.txt >/dev/null 2>&1 && echo $?',
       "0"
     ],
     
+    #test2
     [ 'cmp base/pokercats.gif test/pokercats.gif >/dev/null 2>&1 && echo $?',
       "0"
     ],
         
+    #test 3    
     [ 'ls -l test/pokercats.gif | awk "{ print \$5 }"',
       "91308"
     ],
@@ -22,37 +25,45 @@ close FOO;
     # test writing
     # We use dd to write because it doesn't initially truncate, and it can
     # be told to seek forward to a particular point in the disk.
+    #test 4
     [ "echo Bybye | dd bs=1 count=5 of=test/hello.txt conv=notrunc >/dev/null 2>&1 ; cat test/hello.txt",
       "Bybye, world!"
     ],
     
+    #test 5
     [ "echo Hello | dd bs=1 count=5 of=test/hello.txt conv=notrunc >/dev/null 2>&1 ; cat test/hello.txt",
       "Hello, world!"
     ],
     
+    #test 6
     [ "echo gi | dd bs=1 count=2 seek=7 of=test/hello.txt conv=notrunc >/dev/null 2>&1 ; cat test/hello.txt",
       "Hello, girld!"
     ],
     
+    #test 7
     [ "echo worlds galore | dd bs=1 count=13 seek=7 of=test/hello.txt conv=notrunc >/dev/null 2>&1 ; cat test/hello.txt",
       "Hello, worlds galore"
     ],
     
+    #test 8
     [ "echo 'Hello, world!' > test/hello.txt ; cat test/hello.txt",
       "Hello, world!"
     ],
     
     # create a file
+    #test 9
     [ 'touch test/file1 && echo $?',
       "0"
     ],
 
     # read directory
+    #test 10
     [ 'touch test/dir-contents.txt ; ls test | tee test/dir-contents.txt | grep file1',
       'file1'
     ],
 
     # write files, remove them, then read dir again
+    #test 11
     [ 'ls test | dd bs=1 of=test/dir-contents.txt >/dev/null 2>&1; ' .
       ' touch test/foo test/bar test/baz && '.
       ' rm    test/foo test/bar test/baz && '.
@@ -61,32 +72,38 @@ close FOO;
     ],
 
     # remove the last file
+    #test 12
     [ 'rm -f test/dir-contents.txt && ls test | grep dir-contents.txt',
       ''
     ],
 
 
     # write to a file
+    #test 13
     [ 'echo hello > test/file1 && cat test/file1',
       'hello'
     ],
     
     # append to a file
+    #test 14
     [ 'echo hello > test/file1 ; echo goodbye >> test/file1 && cat test/file1',
       'hello goodbye'
     ],
 
     # delete a file
+    #test 15
     [ 'rm -f test/file1 && ls test | grep file1',
       ''
     ],
 
     # make a larger file for indirect blocks
+    #test 16
     [ 'yes | head -n 5632 > test/yes.txt && ls -l test/yes.txt | awk \'{ print $5 }\'',
       '11264'
     ],
    
     # truncate the large file
+    #test 17
     [ 'echo truncernated11 > test/yes.txt | ls -l test/yes.txt | awk \'{ print $5 }\' ; rm test/yes.txt',
       '15'
     ],

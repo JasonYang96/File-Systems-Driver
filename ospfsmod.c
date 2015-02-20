@@ -448,7 +448,7 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	while (r == 0 && ok_so_far >= 0 && f_pos >= 2) {
 		ospfs_direntry_t *od = ospfs_inode_data(dir_oi, offset);
 		ospfs_inode_t *entry_oi = ospfs_inode(od->od_ino);
-		int ftype;
+		int ftype = -1;
 
 		/* If at the end of the directory, set 'r' to 1 and exit
 		 * the loop.  For now we do this all the time.
@@ -680,7 +680,14 @@ static int32_t
 indir2_index(uint32_t b)
 {
 	// Your code here.
-	return -1;
+	if( b > OSPFS_NDIRECT + OSPFS_NINDIRECT)
+	{
+		return 0;
+	}
+	else
+	{
+		return -1;
+	}
 }
 
 
@@ -699,7 +706,22 @@ static int32_t
 indir_index(uint32_t b)
 {
 	// Your code here.
-	return -1;
+	//check if in direct
+	if ( b < OSPFS_NDIRECT)
+	{
+		return -1;
+	}
+	//check if in indirect
+	else if (indir2_index(b) == -1)
+	{
+		return 0;
+	}
+	//else offset within doubly indirect block
+	else
+	{
+		b -= OSPFS_NDIRECT + OSPFS_NINDIRECT;
+		return b/OSPFS_NINDIRECT;
+	}
 }
 
 
@@ -716,7 +738,15 @@ static int32_t
 direct_index(uint32_t b)
 {
 	// Your code here.
-	return -1;
+	if ( b < OSPFS_NDIRECT)
+	{
+		return b;
+	}
+	else
+	{
+		b -= OSPFS_NDIRECT;
+		return b % OSPFS_NINDIRECT;
+	}
 }
 
 
@@ -761,6 +791,13 @@ add_block(ospfs_inode_t *oi)
 	uint32_t *allocated[2] = { 0, 0 };
 
 	/* EXERCISE: Your code here */
+	//already reached MAXFILEBLKS
+	if (n == OSPFS_MAXFILEBLKS)
+	{
+		return -EIO;
+	}
+
+
 	return -EIO; // Replace this line
 }
 
