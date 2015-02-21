@@ -788,9 +788,9 @@ add_block(ospfs_inode_t *oi)
 	uint32_t n = ospfs_size2nblocks(oi->oi_size);
 
 	// keep track of allocations to free in case of -ENOSPC
-	uint32_t *allocated[2] = { 0, 0 };
+	uint32_t allocated[2] = { 0, 0 };
 
-	uint32_t *indirect2_indirect_block;
+	uint32_t indirect2_indirect_block;
 	uint32_t block;
 
 	/* EXERCISE: Your code here */
@@ -820,7 +820,7 @@ add_block(ospfs_inode_t *oi)
 		}
 
 		//load indirect block
-		indirect2_indirect_block = ((uint32_t *) ospfs_block(oi->oi_indirect2))[indir_index(n)];
+		indirect2_indirect_block = ((uint32_t *)ospfs_block(oi->oi_indirect2))[indir_index(n)];
 
 		//allocate indirect block if needed
 		if (!indirect2_indirect_block)
@@ -862,8 +862,8 @@ add_block(ospfs_inode_t *oi)
 			memset(ospfs_block(block), 0, OSPFS_BLKSIZE);
 		}
 
-		b -= OSPFS_NINDIRECT+ indirect_index(n);
-		((uint32_t *) ospfs_block(indirect2_indirect_block))[direct_index(n)] = block;
+		n -= OSPFS_NINDIRECT+ indir_index(n);
+		((uint32_t *)ospfs_block(indirect2_indirect_block))[direct_index(n)] = block;
 	}
 	//in indirect block
 	else if(indir_index(n) == 0)
@@ -970,19 +970,19 @@ remove_block(ospfs_inode_t *oi)
 	if (indir2_index(n) == 0)
 	{
 		indirec2_block = (uint32_t *) ospfs_block(oi->oi_indirect2);
-		indirect2_indirect_block = (uint32_t *) ospfs_block(indirect2_block[indir_index(n)]);
+		indirect2_indirect_block = (uint32_t *) ospfs_block(indirec2_block[indir_index(n)]);
 		n_copy -= OSPFS_NINDIRECT + indir_index(n);
 		free_block(indirect2_indirect_block[direct_index(n_copy)]);
 
 		if (indir2_index(n) != indir2_index(n-1))
 		{
-			free_block(indirect2_block[indir_index(n)]);
+			free_block(indirec2_block[indir_index(n)]);
 			indirec2_block[indir_index(n)] = 0;
 		}
 
 		if (indir_index(n-1) == 0)
 		{
-			free_block(oi->oi_indirec2);
+			free_block(oi->oi_indirect2);
 			oi->oi_indirect2 = 0;
 		}
 
@@ -992,7 +992,7 @@ remove_block(ospfs_inode_t *oi)
 	{
 		indirec_block = (uint32_t *) ospfs_block(oi->oi_indirect);
 		free_block(indirec_block[direct_index(n)]);
-		indirec_block[direct_index(n)]) = 0;
+		indirec_block[direct_index(n)] = 0;
 
 		if (indir_index(n-1) == -1)
 		{
@@ -1054,20 +1054,44 @@ static int
 change_size(ospfs_inode_t *oi, uint32_t new_size)
 {
 	uint32_t old_size = oi->oi_size;
-	int r = 0;
+	int r = 0; 
+	int t = 0;
 
-	while (ospfs_size2nblocks(oi->oi_size) < ospfs_size2nblocks(new_size)) {
-	        /* EXERCISE: Your code here */
-		return -EIO; // Replace this line
+	while (ospfs_size2nblocks(oi->oi_size) < ospfs_size2nblocks(new_size)) 
+	{
+	    /* EXERCISE: Your code here */
+		r = add_block(oi);
+		if (r != 0)
+		{
+			while (ospfs_size2nblocks(oi->oi_size) > old_size) 
+			{
+				t = remove_block(oi);
+				if (t != 0)
+				{
+					return t;
+				}
+			}
+			return r;
+		}
 	}
-	while (ospfs_size2nblocks(oi->oi_size) > ospfs_size2nblocks(new_size)) {
-	        /* EXERCISE: Your code here */
-		return -EIO; // Replace this line
+	while (ospfs_size2nblocks(oi->oi_size) > ospfs_size2nblocks(new_size)) 
+	{
+	    /* EXERCISE: Your code here */
+		r = remove_block(oi);
+		if (r != 0)
+		{
+			return r;
+		}
 	}
 
 	/* EXERCISE: Make sure you update necessary file meta data
 	             and return the proper value. */
-	return -EIO; // Replace this line
+	if (oi->oi_size != new_size)
+	{
+		oi->oi_size = new_size;
+		eprintk("oi_size != newsize");
+	}
+	return 0;
 }
 
 
