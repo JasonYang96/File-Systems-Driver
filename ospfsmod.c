@@ -427,8 +427,7 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	uint32_t f_pos = filp->f_pos;
 	int r = 0;		/* Error return value, if any */
 	int ok_so_far = 0;	/* Return value from 'filldir' */
-
-	uint32_t offset = (f_pos - 2) * OSPFS_DIRENTRY_SIZE;
+	eprintk("f_pos is %u\n", f_pos);
 
 	// f_pos is an offset into the directory's data, plus two.
 	// The "plus two" is to account for "." and "..".
@@ -436,25 +435,26 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		ok_so_far = filldir(dirent, ".", 1, f_pos, dir_inode->i_ino, DT_DIR);
 		if (ok_so_far >= 0)
 			f_pos++;
+		eprintk("filled .\n");
 	}
 
 	if (r == 0 && ok_so_far >= 0 && f_pos == 1) {
 		ok_so_far = filldir(dirent, "..", 2, f_pos, filp->f_dentry->d_parent->d_inode->i_ino, DT_DIR);
 		if (ok_so_far >= 0)
 			f_pos++;
+		eprintk("filled ..\n");
 	}
 
 	// actual entries
 	while (r == 0 && ok_so_far >= 0 && f_pos >= 2) {
-		ospfs_direntry_t *od = ospfs_inode_data(dir_oi, offset);
-		ospfs_inode_t *entry_oi = ospfs_inode(od->od_ino);
-		int ftype = -1;
+		ospfs_direntry_t *od = ospfs_inode_data(dir_oi, (f_pos - 2) * OSPFS_DIRENTRY_SIZE);
+		ospfs_inode_t *oi = ospfs_inode(od->od_ino);
 
 		/* If at the end of the directory, set 'r' to 1 and exit
 		 * the loop.  For now we do this all the time.
 		 *
 		 * EXERCISE: Your code here */
-		if (offset >= dir_oi->oi_size)
+		if ((f_pos - 2) * OSPFS_DIRENTRY_SIZE >= dir_oi->oi_size)
 		{
 			r = 1;
 			eprintk("@end of dir\n");
@@ -483,42 +483,38 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 
 		/* EXERCISE: Your code here */
 
-		//check if dir is empty
-		if (entry_oi == NULL || od->od_ino == 0)
+		//check if entry is blank
+		if (oi == NULL || od->od_ino == 0)
 		{
 			f_pos++;
-			eprintk("dir is empty\n");
 			continue;
 		}
 
-		switch (entry_oi->oi_ftype)
+		switch (oi->oi_ftype)
 		{
 			//file
 			case OSPFS_FTYPE_REG:
-				ftype = DT_REG;
+				ok_so_far = filldir(dirent, od->od_name, strlen(od->od_name), f_pos, od->od_ino, DT_REG);
 				eprintk("ftype reg\n");
 				break;
 
 			//dir	
 			case OSPFS_FTYPE_DIR:
-				ftype = DT_DIR;
+				ok_so_far = filldir(dirent, od->od_name, strlen(od->od_name), f_pos, od->od_ino, DT_DIR);
 				eprintk("ftype dir\n");
 				break;
 
 			//sym link
 			case OSPFS_FTYPE_SYMLINK:
-				ftype = DT_LNK;
+				ok_so_far = filldir(dirent, od->od_name, strlen(od->od_name), f_pos, od->od_ino, DT_LNK);
 				eprintk("ftype symlink\n");
 				break;
 
 			default:
 				eprintk("Error reading file type\n");
-				r = 3;
+				r = -1;
 				break;
 		}
-
-		//update ok_so_far
-		ok_so_far = filldir(dirent, od->od_name, strlen(od->od_name), f_pos, od->od_ino, ftype);
 		f_pos++;
 	}
 
@@ -597,7 +593,7 @@ static uint32_t
 allocate_block(void)
 {
 	/* EXERCISE: Your code here */
-	uint32_t k = (ospfs_super->os_firstinob + ospfs_super->os_ninodes);
+	uint32_t k = OSPFS_FREEMAP_BLK;
 
 	//loads bitmap block
 	void *bitmap = ospfs_block(OSPFS_FREEMAP_BLK);
@@ -608,7 +604,6 @@ allocate_block(void)
 		if(bitvector_test(bitmap, k))
 		{
 			bitvector_clear(bitmap, k);
-			eprintk("Allocating block %u", k);
 			return k;
 		}
 	}
@@ -638,7 +633,7 @@ free_block(uint32_t blockno)
 	//check valid blockno
 	if (blockno < (ospfs_super->os_firstinob + ospfs_super->os_ninodes) || blockno > ospfs_super->os_nblocks)
 	{
-		eprintk("Tried to free invalid blockno %u", blockno);
+		eprintk("Tried to free invalid blockno %u\n", blockno);
 		return;
 	}
 
@@ -1089,7 +1084,7 @@ change_size(ospfs_inode_t *oi, uint32_t new_size)
 	if (oi->oi_size != new_size)
 	{
 		oi->oi_size = new_size;
-		eprintk("oi_size != newsize");
+		eprintk("oi_size != newsize\n");
 	}
 	return 0;
 }
@@ -1345,7 +1340,24 @@ create_blank_direntry(ospfs_inode_t *dir_oi)
 	//    entries and return one of them.
 
 	/* EXERCISE: Your code here. */
-	return ERR_PTR(-EINVAL); // Replace this line
+	ospfs_direntry_t *od;
+	int retval;
+	uint32_t k = 0;
+
+	// look for empty entry
+	for (; k < dir_oi->oi_size; k += OSPFS_DIRENTRY_SIZE) {
+		od = ospfs_inode_data(dir_oi, k);
+		if (od->od_ino == 0)
+			return od;
+	}
+
+	//add block to create more entries
+	retval = add_block(dir_oi);
+	if (retval < 0)
+		return ERR_PTR(retval);
+
+	od = ospfs_inode_data(dir_oi, k + OSPFS_DIRENTRY_SIZE);
+	return od;
 }
 
 // ospfs_link(src_dentry, dir, dst_dentry
@@ -1417,8 +1429,58 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
 {
 	ospfs_inode_t *dir_oi = ospfs_inode(dir->i_ino);
 	uint32_t entry_ino = 0;
+
+	ospfs_direntry_t *od;
+	ospfs_inode_t *oi;
+	uint32_t m = 0;
+	
 	/* EXERCISE: Your code here. */
-	return -EINVAL; // Replace this line
+	// Error, I/O.
+    if (dir_oi->oi_nlink + 1 == 0)
+        return -EIO;
+    // Error, if file name is too long.
+    if (dentry->d_name.len > OSPFS_MAXNAMELEN)
+        return -ENAMETOOLONG;
+    // Error, if file already exists.
+    if (find_direntry(dir_oi, dentry->d_name.name, dentry->d_name.len))
+        return -EEXIST;
+    
+    // Find an empty directory.
+    od = create_blank_direntry(dir_oi);
+    // IS_ERR(ptr): Returns true iff 'ptr' is an error value.
+    // PTR_ERR(ptr): Returns the error value for an error pointer.
+    if (IS_ERR(od))
+    {
+        return PTR_ERR(od);
+    }
+    
+    // Find an empty inode.
+    for (entry_ino = ospfs_super->os_firstinob; entry_ino < ospfs_super->os_ninodes; entry_ino++) {
+        oi = ospfs_inode(entry_ino);
+        if (oi->oi_nlink == 0)
+            break;
+    }
+    // Error, the disk is full & the file can't be created.
+    if (entry_ino >= ospfs_super->os_ninodes)
+        return -ENOSPC;
+    
+    // Initialize the directory entry.
+    od->od_ino = entry_ino;
+    memcpy(od->od_name, dentry->d_name.name, dentry->d_name.len);
+    od->od_name[dentry->d_name.len] = '\0';
+    
+    // Initialize the inode.
+    oi->oi_size = 0;
+    oi->oi_ftype = OSPFS_FTYPE_REG;
+    oi->oi_nlink = 1;
+    oi->oi_mode = mode;
+    oi->oi_indirect = 0;
+    oi->oi_indirect2 = 0;
+    for (; m < OSPFS_NDIRECT; m++) {
+        oi->oi_direct[m] = 0;
+    }
+
+    dir_oi->oi_nlink++;
 
 	/* Execute this code after your function has successfully created the
 	   file.  Set entry_ino to the created file's inode number before
