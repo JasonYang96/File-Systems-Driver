@@ -1173,6 +1173,7 @@ ospfs_read(struct file *filp, char __user *buffer, size_t count, loff_t *f_pos)
 			n = count - amount;
         
         if (copy_to_user(buffer, data + offset, n) != 0) {
+        	eprintk("Returning -EFAULT from read\n");
             return -EFAULT;
         }
 
@@ -1249,7 +1250,8 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
 		if (n > count - amount)
 			n = count - amount;
         
-        if (copy_to_user(data + offset, buffer, n) != 0) {
+        if (copy_from_user(data + offset, buffer, n) != 0) {
+        	eprintk("returning -EFAULT from write\n");
             return -EFAULT;
         }
 
