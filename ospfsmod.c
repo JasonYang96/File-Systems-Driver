@@ -453,7 +453,6 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		if ((f_pos - 2) * OSPFS_DIRENTRY_SIZE >= dir_oi->oi_size)
 		{
 			r = 1;
-			eprintk("@end of dir\n");
 			break;
 		}
 
@@ -478,7 +477,7 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		 */
 
 		//check if entry is blank
-		if (oi == NULL || od->od_ino == 0)
+		if (od->od_ino == 0)
 		{
 			f_pos++;
 			continue;
@@ -489,24 +488,20 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 			//file
 			case OSPFS_FTYPE_REG:
 				ok_so_far = filldir(dirent, od->od_name, strlen(od->od_name), f_pos, od->od_ino, DT_REG);
-				eprintk("ftype reg\n");
 				break;
 
 			//dir	
 			case OSPFS_FTYPE_DIR:
 				ok_so_far = filldir(dirent, od->od_name, strlen(od->od_name), f_pos, od->od_ino, DT_DIR);
-				eprintk("ftype dir\n");
 				break;
 
 			//sym link
 			case OSPFS_FTYPE_SYMLINK:
 				ok_so_far = filldir(dirent, od->od_name, strlen(od->od_name), f_pos, od->od_ino, DT_LNK);
-				eprintk("ftype symlink\n");
 				break;
 
 			default:
-				eprintk("Error reading file type\n");
-				r = -1;
+				return -ENOENT;
 				break;
 		}
 		f_pos++;
@@ -629,14 +624,21 @@ static void
 free_block(uint32_t blockno)
 {
 	//check valid blockno
-	if (blockno < (ospfs_super->os_firstinob + ospfs_super->os_ninodes / OSPFS_BLKINODES) || blockno > ospfs_super->os_nblocks)
+	if (blockno < ospfs_super->os_firstinob + (ospfs_super->os_ninodes / OSPFS_BLKINODES) || blockno > ospfs_super->os_nblocks)
 	{
 		eprintk("Tried to free invalid blockno %u\n", blockno);
 		return;
 	}
 
 	//free blockno
-	bitvector_set(ospfs_block(OSPFS_FREEMAP_BLK), blockno);
+	if (bitvector_test(ospfs_block(OSPFS_FREEMAP_BLK), blockno))
+	{
+		return;
+	}
+	else
+	{
+		bitvector_set(ospfs_block(OSPFS_FREEMAP_BLK), blockno);
+	}
 }
 
 
@@ -804,14 +806,10 @@ add_block(ospfs_inode_t *oi)
 			{
 				return -ENOSPC;
 			}
-			else
-			{
-				memset(ospfs_block(allocated[0]), 0, OSPFS_BLKSIZE);
-			}
+			memset(ospfs_block(allocated[0]), 0, OSPFS_BLKSIZE);
 			oi->oi_indirect2 = allocated[0];
 		}
-
-		//load indirect block
+		// indirect block
 		indirect2_indirect_block = ((uint32_t *)ospfs_block(oi->oi_indirect2))[indir_index(n)];
 
 		//allocate indirect block if needed
@@ -827,34 +825,26 @@ add_block(ospfs_inode_t *oi)
 				}
 				return -ENOSPC;
 			}
-			else
-			{
-				memset(ospfs_block(allocated[1]), 0, OSPFS_BLKSIZE);
-			}
-
-			indirect2_indirect_block = allocated[1];
+			memset(ospfs_block(allocated[1]), 0, OSPFS_BLKSIZE);
+			indirect2_indirect_block = ((uint32_t *)ospfs_block(oi->oi_indirect2))[indir_index(n)] = allocated[1];
 		}
 
 		//allocate direct block
 		block = allocate_block();
 		if (!block) {
+			if (allocated[1])
+			{
+				free_block(allocated[1]);
+				((uint32_t *)ospfs_block(oi->oi_indirect2))[indir_index(n)] = 0;
+			}
 			if (allocated[0]) 
 			{
 				free_block(allocated[0]);
 				oi->oi_indirect2 = 0;
 			}
-			if (allocated[1])
-			{
-				free_block(allocated[1]);
-			}
 			return -ENOSPC;
 		}
-		else
-		{
-			memset(ospfs_block(block), 0, OSPFS_BLKSIZE);
-		}
-
-		//n -= OSPFS_NINDIRECT+ indir_index(n);
+		memset(ospfs_block(block), 0, OSPFS_BLKSIZE);
 		((uint32_t *)ospfs_block(indirect2_indirect_block))[direct_index(n)] = block;
 	}
 	//in indirect block
@@ -869,10 +859,7 @@ add_block(ospfs_inode_t *oi)
 			{
 				return -ENOSPC;
 			}
-			else
-			{
-				memset(ospfs_block(allocated[0]), 0, OSPFS_BLKSIZE);
-			}
+			memset(ospfs_block(allocated[0]), 0, OSPFS_BLKSIZE);
 			oi->oi_indirect = allocated[0];
 		}
 
@@ -887,10 +874,7 @@ add_block(ospfs_inode_t *oi)
 			}
 			return -ENOSPC;
 		}
-		else
-		{
-			memset(ospfs_block(block), 0, OSPFS_BLKSIZE);
-		}
+		memset(ospfs_block(block), 0, OSPFS_BLKSIZE);
 		((uint32_t *) ospfs_block(oi->oi_indirect))[direct_index(n)] = block;
 	}
 	else //in direct block
@@ -901,15 +885,12 @@ add_block(ospfs_inode_t *oi)
 		{
 			return -ENOSPC;
 		}
-		else
-		{
-			memset(ospfs_block(block), 0, OSPFS_BLKSIZE);
-		}
+		memset(ospfs_block(block), 0, OSPFS_BLKSIZE);
 		oi->oi_direct[n] = block;
 	}
 
 	//update oi->oi_size field
-	oi->oi_size = (n + 1) * OSPFS_BLKSIZE;
+	oi->oi_size += OSPFS_BLKSIZE;
 
 	return 0;
 }
@@ -1147,7 +1128,7 @@ ospfs_read(struct file *filp, char __user *buffer, size_t count, loff_t *f_pos)
 	if (*f_pos + count > oi->oi_size)
         count = oi->oi_size - *f_pos;
     else if (oi->oi_size <= *f_pos)
-        count = 0;
+        count = -EIO;
 
 	// Copy the data to user block by block
 	while (amount < count && retval >= 0) {
@@ -1172,8 +1153,7 @@ ospfs_read(struct file *filp, char __user *buffer, size_t count, loff_t *f_pos)
 		if (n > count - amount)
 			n = count - amount;
         
-        if (copy_to_user(buffer, data + offset, n) != 0) {
-        	eprintk("Returning -EFAULT from read\n");
+        if (copy_to_user(buffer, data + offset, n) > 0) {
             return -EFAULT;
         }
 
@@ -1210,6 +1190,10 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
 	ospfs_inode_t *oi = ospfs_inode(filp->f_dentry->d_inode->i_ino);
 	int retval = 0;
 	size_t amount = 0;
+
+	//overflow of *f_pos
+	if (*f_pos + count < *f_pos)
+		return -EIO;
 
 	// Support files opened with the O_APPEND flag.  To detect O_APPEND,
 	// use struct file's f_flags field and the O_APPEND bit.
@@ -1251,11 +1235,9 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
 			n = count - amount;
         
         if (copy_from_user(data + offset, buffer, n) != 0) {
-        	eprintk("returning -EFAULT from write\n");
             return -EFAULT;
         }
 
-        oi->oi_size += (*f_pos + n) - oi->oi_size;
 		buffer += n;
 		amount += n;
 		*f_pos += n;
