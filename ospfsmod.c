@@ -327,7 +327,7 @@ ospfs_delete_dentry(struct dentry *dentry)
 /*****************************************************************************
  * DIRECTORY OPERATIONS
  *
- * EXERCISE: Finish 'ospfs_dir_readdir' and 'ospfs_symlink'.
+ * EXERCISE STARTED: Finish 'ospfs_dir_readdir' and 'ospfs_symlink'.
  */
 
 // ospfs_dir_lookup(dir, dentry, ignore)
@@ -552,7 +552,7 @@ ospfs_unlink(struct inode *dirino, struct dentry *dentry)
 	oi->oi_nlink--;
 	dir_oi->oi_nlink--;
 
-	//deleting symbolic links
+	//deleting sym links
 	if (oi->oi_nlink == 0 && oi->oi_ftype != OSPFS_FTYPE_SYMLINK)
 	{
 		change_size(oi, 0);
@@ -1311,7 +1311,7 @@ create_blank_direntry(ospfs_inode_t *dir_oi)
 
 	ospfs_direntry_t *od;
 	int retval;
-	uint32_t k = 0, size = 0;
+	uint32_t k = 0;
 
 	// look for empty entry
 	for (; k < dir_oi->oi_size; k += OSPFS_DIRENTRY_SIZE) {
@@ -1356,12 +1356,39 @@ create_blank_direntry(ospfs_inode_t *dir_oi)
 //               -ENOSPC       if the disk is full & the file can't be created;
 //               -EIO          on I/O error.
 //
-//   EXERCISE: Complete this function.
+//   EXERCISE STARTED: Complete this function.
 
 static int
 ospfs_link(struct dentry *src_dentry, struct inode *dir, struct dentry *dst_dentry) {
-	/* EXERCISE: Your code here. */
-	return -EINVAL;
+	ospfs_inode_t *od = ospfs_inode(dir->i_ino);
+	ospfs_direntry_t* sym;
+
+	//check directory is okay
+	if(od == NULL || od->oi_nlink + 1 == 0 || od->oi_ftype != OSPFS_FTYPE_DIR)
+		return -EIO;
+
+	//check name length
+	if(dst_dentry->d_name.len > OSPFS_MAXSYMLINKLEN)
+		return -ENAMETOOLONG;
+
+	//check exisiting direntry
+	if(find_direntry(od, dst_dentry->d_name.name, dst_dentry->d_name.len))
+		return -EEXIST;
+
+	//creating new direntry
+	sym = create_blank_direntry(od);
+	if (IS_ERR(sym))
+		return PTR_ERR(sym);
+
+	//initalize direntry
+	sym->od_ino = src_dentry->d_inode->i_ino;
+	memcpy(sym->od_name, dst_dentry->d_name.name, dst_dentry->d_name.len);
+	sym->od_name[dst_dentry->d_name.len] = '\0';
+
+	//incrementing nlink, incrementing in src technically increments in des 
+	//so it's fine to just increment 1
+	ospfs_inode(src_dentry->d_inode->i_ino)->oi_nlink++;
+	return 0;
 }
 
 // ospfs_create
@@ -1397,7 +1424,7 @@ static int
 ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidata *nd)
 {
 	ospfs_inode_t *dir_oi = ospfs_inode(dir->i_ino);
-	uint32_t entry_ino = 0;
+	uint32_t entry_ino = 2;
 
 	ospfs_direntry_t *od;
 	ospfs_inode_t *oi;
@@ -1423,7 +1450,7 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
     }
     
     // Find an empty inode.
-    for (entry_ino = ospfs_super->os_firstinob; entry_ino < ospfs_super->os_ninodes; entry_ino++) {
+    for (; entry_ino < ospfs_super->os_ninodes; entry_ino++) {
         oi = ospfs_inode(entry_ino);
         if (oi->oi_nlink == 0)
             break;
@@ -1483,16 +1510,60 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
 //               -ENOSPC       if the disk is full & the file can't be created;
 //               -EIO          on I/O error.
 //
-//   EXERCISE: Complete this function.
+//   EXERCISE STARTED: Complete this function.
+//	 TODO:CONDITIONAL SYMLINKS
 
 static int
 ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 {
 	ospfs_inode_t *dir_oi = ospfs_inode(dir->i_ino);
 	uint32_t entry_ino = 0;
+	ospfs_symlink_inode_t *os;
+	ospfs_direntry_t *od;
 
-	/* EXERCISE: Your code here. */
-	return -EINVAL;
+	//check directory is okay
+	if(dir_oi == NULL || dir_oi->oi_nlink + 1 == 0 || dir_oi->oi_ftype != OSPFS_FTYPE_DIR)
+		return -EIO;
+
+	//check name length
+	if(dentry->d_name.len > OSPFS_MAXSYMLINKLEN)
+		return -ENAMETOOLONG;
+
+	//check exisiting direntry
+	if(find_direntry(dir_oi, dentry->d_name.name, dentry->d_name.len))
+		return -EEXIST;
+
+	// Find an empty inode.
+    for (; entry_ino < ospfs_super->os_ninodes; entry_ino++) {
+        os = (ospfs_symlink_inode_t *) ospfs_inode(entry_ino);
+        if (os->oi_nlink == 0)
+            break;
+    }
+    // Error, the disk is full & the file can't be created.
+    if (entry_ino >= ospfs_super->os_ninodes)
+        return -ENOSPC;
+
+    // Get our new entry
+	od = create_blank_direntry(dir_oi);
+	if (IS_ERR(od))
+		return PTR_ERR(od);
+
+	if (strlen(symname) > OSPFS_MAXSYMLINKLEN)
+		return -ENAMETOOLONG;
+
+	//inialize direntry
+	od->od_ino = entry_ino;
+	memcpy(od->od_name, dentry->d_name.name, dentry->d_name.len);
+	od->od_name[dentry->d_name.len] = '\0';
+
+	//symlink initialization
+	os->oi_size = strlen(symname);
+	memcpy(os->oi_symlink, symname, strlen(symname));
+	os->oi_symlink[os->oi_size] = '\0';
+	os->oi_ftype = OSPFS_FTYPE_SYMLINK;
+	os->oi_nlink = 1;
+
+	dir_oi->oi_nlink++;
 
 	/* Execute this code after your function has successfully created the
 	   file.  Set entry_ino to the created file's inode number before
@@ -1514,7 +1585,7 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 //   Inputs: dentry -- the symbolic link's directory entry
 //           nd     -- to be filled in with the symbolic link's destination
 //
-//   Exercise: Expand this function to handle conditional symlinks.  Conditional
+//   Exercise STARTED: Expand this function to handle conditional symlinks.  Conditional
 //   symlinks will always be created by users in the following form
 //     root?/path/1:/path/2.
 //   (hint: Should the given form be changed in any way to make this method
@@ -1525,10 +1596,33 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	ospfs_symlink_inode_t *oi =
 		(ospfs_symlink_inode_t *) ospfs_inode(dentry->d_inode->i_ino);
-	// Exercise: Your code here.
+	char *path;
 
-	nd_set_link(nd, oi->oi_symlink);
-	return (void *) 0;
+	// If this isn't a conditonal link, set the path and return
+	if(oi->oi_symlink[0] != '?')
+	{
+		nd_set_link(nd, oi->oi_symlink);
+		return (void *) 0;
+	}
+
+	// If root, give a pointer to the start of the root path
+	else if(current->uid == 0)
+	{
+		nd_set_link(nd, oi->oi_symlink + 1);
+		return (void *) 0;
+	}
+
+	else
+	{
+		// Otherwise move to 2nd path
+		path = oi->oi_symlink;
+		while(*path != ':')
+			path++;
+
+		//normal user
+		nd_set_link(nd, path + 1);
+		return (void *) 0;
+	}
 }
 
 
