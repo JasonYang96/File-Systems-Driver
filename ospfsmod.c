@@ -1593,8 +1593,9 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 	char *offset;
 
 	// If this isn't a conditonal link, set the path and return
-	if(strcmp(oi->oi_symlink, "root?"))
+	if(strncmp(oi->oi_symlink, "root?", 5) != 0)
 	{
+		eprintk("not a conditional root\n");
 		nd_set_link(nd, oi->oi_symlink);
 		return (void *) 0;
 	}
@@ -1604,12 +1605,16 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 		//find colon
 		offset = strchr(oi->oi_symlink, ':');
 		*offset = '\0';
+		eprintk("current->uid:%d", current->uid);
 		if(current->uid == 0) //root user
 		{
+			eprintk("believes it is root user\n");
 			nd_set_link(nd, oi->oi_symlink + 5);
 		}
 		else //normal user
 		{
+			eprintk("believes it is normal user\n");
+			offset = &oi->oi_symlink[strlen(oi->oi_symlink)];
 			nd_set_link(nd, offset + 1);
 		}
 		return (void *) 0;
