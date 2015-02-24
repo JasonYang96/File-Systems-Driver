@@ -450,7 +450,7 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 		/* If at the end of the directory, set 'r' to 1 and exit
 		 * the loop.  For now we do this all the time.
 		 */
-		if ((f_pos - 2) * OSPFS_DIRENTRY_SIZE >= dir_oi->oi_size)
+		if ((f_pos - 2) * OSPFS_DIRENTRY_SIZE > dir_oi->oi_size)
 		{
 			r = 1;
 			break;
