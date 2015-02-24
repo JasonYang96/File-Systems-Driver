@@ -483,6 +483,12 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 			continue;
 		}
 
+		if (!oi)
+        {
+            f_pos++;
+            continue;
+        }
+
 		switch (oi->oi_ftype)
 		{
 			//file
@@ -501,8 +507,8 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 				break;
 
 			default:
-				return -ENOENT;
-				break;
+				r = -ENOENT;
+				continue;
 		}
 		f_pos++;
 	}
@@ -550,12 +556,11 @@ ospfs_unlink(struct inode *dirino, struct dentry *dentry)
 
 	od->od_ino = 0;
 	oi->oi_nlink--;
-	dir_oi->oi_nlink--;
 
 	//deleting sym links
 	if (oi->oi_nlink == 0 && oi->oi_ftype != OSPFS_FTYPE_SYMLINK)
 	{
-		change_size(oi, 0);
+		return change_size(oi, 0);
 	}
 	return 0;
 }
@@ -1042,9 +1047,8 @@ change_size(ospfs_inode_t *oi, uint32_t new_size)
 		}
 		else if( r == -ENOSPC)
 		{
-			//new size decremented so 2nd while loop will remove blocks
-			new_size = old_size;
-			break;
+			change_size(oi,old_size);
+			return r;
 		}
 	}
 	while (ospfs_size2nblocks(oi->oi_size) > ospfs_size2nblocks(new_size)) 
@@ -1059,7 +1063,7 @@ change_size(ospfs_inode_t *oi, uint32_t new_size)
 	/*Make sure you update necessary file meta data
 	             and return the proper value. */
 	oi->oi_size = new_size;
-	return 0;
+	return r;
 }
 
 
@@ -1680,6 +1684,6 @@ module_init(init_ospfs_fs)
 module_exit(exit_ospfs_fs)
 
 // Information about the module
-MODULE_AUTHOR("Skeletor");
+MODULE_AUTHOR("Jason Yang and Kelly Ou");
 MODULE_DESCRIPTION("OSPFS");
 MODULE_LICENSE("GPL");
