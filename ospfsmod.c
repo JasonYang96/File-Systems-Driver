@@ -787,7 +787,12 @@ add_block(ospfs_inode_t *oi)
 	uint32_t block;
 
 	//already reached MAXFILEBLKS or invalid n
-	if (n >= OSPFS_MAXFILEBLKS || n < 0)
+	if (n == OSPFS_MAXFILEBLKS)
+	{
+		return -ENOSPC;
+	}
+
+	if (n > OSPFS_MAXFILEBLKS || n < 0)
 	{
 		return -EIO;
 	}
@@ -1188,7 +1193,10 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
 
 	//overflow of *f_pos
 	if (*f_pos + count < *f_pos)
+	{
+		eprintk("overflow in write");
 		return -EIO;
+	}
 
 	// Support files opened with the O_APPEND flag.  To detect O_APPEND,
 	// use struct file's f_flags field and the O_APPEND bit.
@@ -1215,6 +1223,7 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
 		char *data;
 
 		if (blockno == 0) {
+			eprintk("blockno == 0");
 			retval = -EIO;
 			goto done;
 		}
@@ -1428,7 +1437,6 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
 
 	ospfs_direntry_t *od;
 	ospfs_inode_t *oi;
-	uint32_t m = 0;
 	
 	// Error, I/O.
     if (dir_oi->oi_nlink + 1 == 0)
@@ -1469,13 +1477,6 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
     oi->oi_ftype = OSPFS_FTYPE_REG;
     oi->oi_nlink = 1;
     oi->oi_mode = mode;
-    oi->oi_indirect = 0;
-    oi->oi_indirect2 = 0;
-    for (; m < OSPFS_NDIRECT; m++) {
-        oi->oi_direct[m] = 0;
-    }
-
-    dir_oi->oi_nlink++;
 
 	/* Execute this code after your function has successfully created the
 	   file.  Set entry_ino to the created file's inode number before
@@ -1511,7 +1512,6 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
 //               -EIO          on I/O error.
 //
 //   EXERCISE STARTED: Complete this function.
-//	 TODO:CONDITIONAL SYMLINKS
 
 static int
 ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
@@ -1526,7 +1526,7 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 		return -EIO;
 
 	//check name length
-	if(dentry->d_name.len > OSPFS_MAXSYMLINKLEN)
+	if(dentry->d_name.len > OSPFS_MAXSYMLINKLEN || strlen(symname) > OSPFS_MAXSYMLINKLEN)
 		return -ENAMETOOLONG;
 
 	//check exisiting direntry
@@ -1548,9 +1548,6 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 	if (IS_ERR(od))
 		return PTR_ERR(od);
 
-	if (strlen(symname) > OSPFS_MAXSYMLINKLEN)
-		return -ENAMETOOLONG;
-
 	//inialize direntry
 	od->od_ino = entry_ino;
 	memcpy(od->od_name, dentry->d_name.name, dentry->d_name.len);
@@ -1558,12 +1555,9 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 
 	//symlink initialization
 	os->oi_size = strlen(symname);
-	memcpy(os->oi_symlink, symname, strlen(symname));
-	os->oi_symlink[os->oi_size] = '\0';
+	strcpy(os->oi_symlink, symname);
 	os->oi_ftype = OSPFS_FTYPE_SYMLINK;
 	os->oi_nlink = 1;
-
-	dir_oi->oi_nlink++;
 
 	/* Execute this code after your function has successfully created the
 	   file.  Set entry_ino to the created file's inode number before
@@ -1596,31 +1590,28 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
 	ospfs_symlink_inode_t *oi =
 		(ospfs_symlink_inode_t *) ospfs_inode(dentry->d_inode->i_ino);
-	char *path;
+	char *offset;
 
 	// If this isn't a conditonal link, set the path and return
-	if(oi->oi_symlink[0] != '?')
+	if(!strcmp(oi->oi_symlink, "root?"))
 	{
 		nd_set_link(nd, oi->oi_symlink);
 		return (void *) 0;
 	}
-
 	// If root, give a pointer to the start of the root path
-	else if(current->uid == 0)
-	{
-		nd_set_link(nd, oi->oi_symlink + 1);
-		return (void *) 0;
-	}
-
 	else
 	{
-		// Otherwise move to 2nd path
-		path = oi->oi_symlink;
-		while(*path != ':')
-			path++;
-
-		//normal user
-		nd_set_link(nd, path + 1);
+		//find colon
+		offset = strchr(oi->oi_symlink, ':');
+		*offset = '\0';
+		if(current->uid == 0) //root user
+		{
+			nd_set_link(nd, oi->oi_symlink + 5);
+		}
+		else //normal user
+		{
+			nd_set_link(nd, offset + 1);
+		}
 		return (void *) 0;
 	}
 }
