@@ -678,14 +678,10 @@ static int32_t
 indir2_index(uint32_t b)
 {
 	// Your code here.
-	if( b > OSPFS_NDIRECT + OSPFS_NINDIRECT)
-	{
-		return 0;
-	}
-	else
-	{
+	if( b < OSPFS_NDIRECT + OSPFS_NINDIRECT)
 		return -1;
-	}
+	else
+		return 0;
 }
 
 
