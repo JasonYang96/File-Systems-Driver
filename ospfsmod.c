@@ -1517,7 +1517,7 @@ static int
 ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 {
 	ospfs_inode_t *dir_oi = ospfs_inode(dir->i_ino);
-	uint32_t entry_ino = 0;
+	uint32_t entry_ino = 2;
 	ospfs_symlink_inode_t *os;
 	ospfs_direntry_t *od;
 
@@ -1548,7 +1548,7 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 	if (IS_ERR(od))
 		return PTR_ERR(od);
 
-	//inialize direntry
+	//initialize direntry
 	od->od_ino = entry_ino;
 	memcpy(od->od_name, dentry->d_name.name, dentry->d_name.len);
 	od->od_name[dentry->d_name.len] = '\0';
@@ -1593,7 +1593,7 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 	char *offset;
 
 	// If this isn't a conditonal link, set the path and return
-	if(!strcmp(oi->oi_symlink, "root?"))
+	if(strcmp(oi->oi_symlink, "root?"))
 	{
 		nd_set_link(nd, oi->oi_symlink);
 		return (void *) 0;
