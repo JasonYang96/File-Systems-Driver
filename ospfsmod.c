@@ -1604,6 +1604,8 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 	{
 		//find colon
 		offset = strchr(oi->oi_symlink, ':');
+		if(!offset)
+			offset = &oi->oi_symlink[strlen(oi->oi_symlink)];
 		*offset = '\0';
 		eprintk("current->uid:%d", current->uid);
 		if(current->uid == 0) //root user
@@ -1614,7 +1616,6 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 		else //normal user
 		{
 			eprintk("believes it is normal user\n");
-			offset = &oi->oi_symlink[strlen(oi->oi_symlink)];
 			nd_set_link(nd, offset + 1);
 		}
 		return (void *) 0;
