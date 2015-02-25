@@ -16,9 +16,9 @@ Student ID: 804331785
 Email: JasonYang96@ucla.edu
 
 # Partner 2 (if you're working in a team)
-Name: 
-Student ID: 
-Email: 
+Name: Kelly Ou
+Student ID: 404146997
+Email: kellio94@ucla.edu
 
 # Extra credit problems
 #Extra credit problem: none
