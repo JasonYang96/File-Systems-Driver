@@ -24,3 +24,11 @@ Email: kellio94@ucla.edu
 #Extra credit problem: none
 
 # Add any other information you'd like us to know below this line.
+We passed all 17 test cases. We did several tests for ourselves. We tested
+symlinks to make sure that deleting symlinks did not delete the file. We
+also tested hardlinks to make sure that the ionode number was the same, 
+as well as being able to delete hardlinks without deleting original data.
+
+We also tested to make sure we could make big files and process the cat image
+correctly. Tested some more read and write and decided we have throughly found
+all the bugs for this lab.
