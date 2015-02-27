@@ -31,6 +31,33 @@
  * and KERN_EMERG will make sure that you will see messages.) */
 #define eprintk(format, ...) printk(KERN_NOTICE format, ## __VA_ARGS__)
 
+int nwrites_to_crash = -1;
+
+// returns 0 when nwrites_to_crash continues as usual (when == -1, >0)
+// returns -1 when the machine should "crash" or otherwise has an error
+//     (when == 0, <-1)
+int check_for_crash (int nwrites_to_crash)
+{
+    eprintk(nwrites_to_crash);
+    // continue as usual
+    if (nwrites_to_crash == -1) {
+        return 0;
+    }
+    // the program has crashed, no longer do any more writes
+    else if (nwrites_to_crash == 0) {
+        return -1;
+    }
+    // decrement counter
+    else if (nwrites_to_crash > 0) {
+        nwrites_to_crash--;
+        return 0;
+    }
+    else {
+        eprintk("Invalid number of writes available.\n");
+        return -1;
+    }
+}
+
 // The actual disk data is just an array of raw memory.
 // The initial array is defined in fsimg.c, based on your 'base' directory.
 extern uint8_t ospfs_data[];
@@ -450,7 +477,7 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
         /* If at the end of the directory, set 'r' to 1 and exit
          * the loop.  For now we do this all the time.
          */
-        if ((f_pos - 2) * OSPFS_DIRENTRY_SIZE >= dir_oi->oi_size)
+        if ((f_pos - 2) * OSPFS_DIRENTRY_SIZE > dir_oi->oi_size)
         {
             r = 1;
             break;
@@ -483,6 +510,12 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
             continue;
         }
         
+        if (!oi)
+        {
+            f_pos++;
+            continue;
+        }
+        
         switch (oi->oi_ftype)
         {
                 //file
@@ -501,8 +534,8 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
                 break;
                 
             default:
-                return -ENOENT;
-                break;
+                r = -ENOENT;
+                continue;
         }
         f_pos++;
     }
@@ -528,6 +561,9 @@ ospfs_dir_readdir(struct file *filp, void *dirent, filldir_t filldir)
 static int
 ospfs_unlink(struct inode *dirino, struct dentry *dentry)
 {
+    if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+    
     ospfs_inode_t *oi = ospfs_inode(dentry->d_inode->i_ino);
     ospfs_inode_t *dir_oi = ospfs_inode(dentry->d_parent->d_inode->i_ino);
     int entry_off;
@@ -550,13 +586,13 @@ ospfs_unlink(struct inode *dirino, struct dentry *dentry)
     
     od->od_ino = 0;
     oi->oi_nlink--;
-    dir_oi->oi_nlink--;
     
     //deleting sym links
     if (oi->oi_nlink == 0 && oi->oi_ftype != OSPFS_FTYPE_SYMLINK)
     {
-        change_size(oi, 0);
+        return change_size(oi, 0);
     }
+    
     return 0;
 }
 
@@ -588,6 +624,9 @@ ospfs_unlink(struct inode *dirino, struct dentry *dentry)
 static uint32_t
 allocate_block(void)
 {
+    if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+    
     uint32_t k = OSPFS_FREEMAP_BLK;
     
     //loads bitmap block
@@ -622,6 +661,9 @@ allocate_block(void)
 static void
 free_block(uint32_t blockno)
 {
+    if (check_for_crash(nwrites_to_crash) == -1)
+        return;
+    
     //check valid blockno
     if (blockno < ospfs_super->os_firstinob + (ospfs_super->os_ninodes / OSPFS_BLKINODES) || blockno > ospfs_super->os_nblocks)
     {
@@ -673,14 +715,10 @@ static int32_t
 indir2_index(uint32_t b)
 {
     // Your code here.
-    if( b > OSPFS_NDIRECT + OSPFS_NINDIRECT)
-    {
-        return 0;
-    }
-    else
-    {
+    if( b < OSPFS_NDIRECT + OSPFS_NINDIRECT)
         return -1;
-    }
+    else
+        return 0;
 }
 
 
@@ -787,7 +825,12 @@ add_block(ospfs_inode_t *oi)
     uint32_t block;
     
     //already reached MAXFILEBLKS or invalid n
-    if (n >= OSPFS_MAXFILEBLKS || n < 0)
+    if (n == OSPFS_MAXFILEBLKS)
+    {
+        return -ENOSPC;
+    }
+    
+    if (n > OSPFS_MAXFILEBLKS || n < 0)
     {
         return -EIO;
     }
@@ -1025,6 +1068,9 @@ remove_block(ospfs_inode_t *oi)
 static int
 change_size(ospfs_inode_t *oi, uint32_t new_size)
 {
+    if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+    
     uint32_t old_size = oi->oi_size;
     int r = 0;
     
@@ -1037,9 +1083,8 @@ change_size(ospfs_inode_t *oi, uint32_t new_size)
         }
         else if( r == -ENOSPC)
         {
-            //new size decremented so 2nd while loop will remove blocks
-            new_size = old_size;
-            break;
+            change_size(oi,old_size);
+            return r;
         }
     }
     while (ospfs_size2nblocks(oi->oi_size) > ospfs_size2nblocks(new_size))
@@ -1054,7 +1099,7 @@ change_size(ospfs_inode_t *oi, uint32_t new_size)
     /*Make sure you update necessary file meta data
      and return the proper value. */
     oi->oi_size = new_size;
-    return 0;
+    return r;
 }
 
 
@@ -1188,7 +1233,10 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
     
     //overflow of *f_pos
     if (*f_pos + count < *f_pos)
+    {
+        eprintk("overflow in write");
         return -EIO;
+    }
     
     // Support files opened with the O_APPEND flag.  To detect O_APPEND,
     // use struct file's f_flags field and the O_APPEND bit.
@@ -1215,11 +1263,15 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
         char *data;
         
         if (blockno == 0) {
+            eprintk("blockno == 0");
             retval = -EIO;
             goto done;
         }
         
         data = ospfs_block(blockno);
+        
+        if (check_for_crash(nwrites_to_crash) == -1)
+            return 0;
         
         // Figure out how much data is left in this block to write.
         // Copy data from user space. Return -EFAULT if unable to read
@@ -1302,6 +1354,10 @@ find_direntry(ospfs_inode_t *dir_oi, const char *name, int namelen)
 static ospfs_direntry_t *
 create_blank_direntry(ospfs_inode_t *dir_oi)
 {
+    
+    if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+    
     // Outline:
     // 1. Check the existing directory data for an empty entry.  Return one
     //    if you find it.
@@ -1359,7 +1415,12 @@ create_blank_direntry(ospfs_inode_t *dir_oi)
 //   EXERCISE STARTED: Complete this function.
 
 static int
-ospfs_link(struct dentry *src_dentry, struct inode *dir, struct dentry *dst_dentry) {
+ospfs_link(struct dentry *src_dentry, struct inode *dir, struct dentry *dst_dentry)
+{
+    
+    if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+    
     ospfs_inode_t *od = ospfs_inode(dir->i_ino);
     ospfs_direntry_t* sym;
     
@@ -1423,12 +1484,14 @@ ospfs_link(struct dentry *src_dentry, struct inode *dir, struct dentry *dst_dent
 static int
 ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidata *nd)
 {
+    if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+    
     ospfs_inode_t *dir_oi = ospfs_inode(dir->i_ino);
     uint32_t entry_ino = 2;
     
     ospfs_direntry_t *od;
     ospfs_inode_t *oi;
-    uint32_t m = 0;
     
     // Error, I/O.
     if (dir_oi->oi_nlink + 1 == 0)
@@ -1469,13 +1532,6 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
     oi->oi_ftype = OSPFS_FTYPE_REG;
     oi->oi_nlink = 1;
     oi->oi_mode = mode;
-    oi->oi_indirect = 0;
-    oi->oi_indirect2 = 0;
-    for (; m < OSPFS_NDIRECT; m++) {
-        oi->oi_direct[m] = 0;
-    }
-    
-    dir_oi->oi_nlink++;
     
     /* Execute this code after your function has successfully created the
      file.  Set entry_ino to the created file's inode number before
@@ -1511,13 +1567,15 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
 //               -EIO          on I/O error.
 //
 //   EXERCISE STARTED: Complete this function.
-//	 TODO:CONDITIONAL SYMLINKS
 
 static int
 ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 {
+    if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+    
     ospfs_inode_t *dir_oi = ospfs_inode(dir->i_ino);
-    uint32_t entry_ino = 0;
+    uint32_t entry_ino = 2;
     ospfs_symlink_inode_t *os;
     ospfs_direntry_t *od;
     
@@ -1526,7 +1584,7 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
         return -EIO;
     
     //check name length
-    if(dentry->d_name.len > OSPFS_MAXSYMLINKLEN)
+    if(dentry->d_name.len > OSPFS_MAXSYMLINKLEN || strlen(symname) > OSPFS_MAXSYMLINKLEN)
         return -ENAMETOOLONG;
     
     //check exisiting direntry
@@ -1548,45 +1606,16 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
     if (IS_ERR(od))
         return PTR_ERR(od);
     
-    if (strlen(symname) > OSPFS_MAXSYMLINKLEN)
-        return -ENAMETOOLONG;
-    
-    //inialize direntry
+    //initialize direntry
     od->od_ino = entry_ino;
     memcpy(od->od_name, dentry->d_name.name, dentry->d_name.len);
     od->od_name[dentry->d_name.len] = '\0';
     
-    char* qmark = strpbrk(symname, "?");
-    char* cmark = strpbrk(symname, ":");
-    
-    // Check to see if symlink is conditional.
-    if (qmark && cmark && cmark > qmark)
-    {
-        // Account for the length of "root?", which we don't need.
-        size_t t_symlink = cmark - qmark; // path if condition is true
-        size_t f_symlink = strlen(cmark); // path if condition is false
-        
-        // +1 because of null byte.
-        if(t_symlink + f_symlink + 1 > OSPFS_MAXNAMELEN)
-            return -ENAMETOOLONG;
-        
-        // +1 because of null byte, with size from question mark to end of string.
-        // Store string.
-        os->oi_size = strlen(qmark) + 1;
-        strncpy(os->oi_symlink, qmark, t_symlink);
-        os->oi_symlink[t_symlink] = '\0';
-        strncpy(os->oi_symlink + t_symlink + 1, cmark, f_symlink);
-    }
-    else {
-        //symlink initialization
-        os->oi_size = strlen(symname);
-        memcpy(os->oi_symlink, symname, strlen(symname));
-        os->oi_nlink = 1;
-    }
-    
+    //symlink initialization
+    os->oi_size = strlen(symname);
+    strcpy(os->oi_symlink, symname);
     os->oi_ftype = OSPFS_FTYPE_SYMLINK;
-    os->oi_symlink[os->oi_size] = '\0';
-    dir_oi->oi_nlink++;
+    os->oi_nlink = 1;
     
     /* Execute this code after your function has successfully created the
      file.  Set entry_ino to the created file's inode number before
@@ -1619,31 +1648,34 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 {
     ospfs_symlink_inode_t *oi =
     (ospfs_symlink_inode_t *) ospfs_inode(dentry->d_inode->i_ino);
-    char *path;
+    char *offset;
     
     // If this isn't a conditonal link, set the path and return
-    if(oi->oi_symlink[0] != '?')
+    if(strncmp(oi->oi_symlink, "root?", 5) != 0)
     {
+        eprintk("not a conditional root\n");
         nd_set_link(nd, oi->oi_symlink);
         return (void *) 0;
     }
-    
     // If root, give a pointer to the start of the root path
-    else if(current->uid == 0)
-    {
-        nd_set_link(nd, oi->oi_symlink + 1);
-        return (void *) 0;
-    }
-    
     else
     {
-        // Otherwise move to 2nd path
-        path = oi->oi_symlink;
-        while(*path != ':')
-            path++;
-        
-        //normal user
-        nd_set_link(nd, path + 1);
+        //find colon
+        offset = strchr(oi->oi_symlink, ':');
+        if(!offset)
+            offset = &oi->oi_symlink[strlen(oi->oi_symlink)];
+        *offset = '\0';
+        eprintk("current->uid:%d", current->uid);
+        if(current->uid == 0) //root user
+        {
+            eprintk("believes it is root user\n");
+            nd_set_link(nd, oi->oi_symlink + 5);
+        }
+        else //normal user
+        {
+            eprintk("believes it is normal user\n");
+            nd_set_link(nd, offset + 1);
+        }
         return (void *) 0;
     }
 }
@@ -1712,6 +1744,6 @@ module_init(init_ospfs_fs)
 module_exit(exit_ospfs_fs)
 
 // Information about the module
-MODULE_AUTHOR("Skeletor");
+MODULE_AUTHOR("Jason Yang and Kelly Ou");
 MODULE_DESCRIPTION("OSPFS");
 MODULE_LICENSE("GPL");
