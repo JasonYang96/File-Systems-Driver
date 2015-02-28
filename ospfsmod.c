@@ -31,6 +31,33 @@
  * and KERN_EMERG will make sure that you will see messages.) */
 #define eprintk(format, ...) printk(KERN_NOTICE format, ## __VA_ARGS__)
 
+static int nwrites_to_crash = 0;
+
+// returns 0 when nwrites_to_crash continues as usual (when == -1, >0)
+// returns -1 when the machine should "crash" or otherwise has an error
+//     (when == 0, <-1)
+int check_for_crash (int nwrites_to_crash)
+{
+    eprintk("nwrotes_to_crash is: %d\n", nwrites_to_crash);
+    // continue as usual
+    if (nwrites_to_crash == -1) {
+        return 0;
+    }
+    // the program has crashed, no longer do any more writes
+    else if (nwrites_to_crash == 0) {
+        return -1;
+    }
+    // decrement counter
+    else if (nwrites_to_crash > 0) {
+        nwrites_to_crash--;
+        return 0;
+    }
+    else {
+        eprintk("Invalid number of writes available.\n");
+        return -1;
+    }
+}
+
 // The actual disk data is just an array of raw memory.
 // The initial array is defined in fsimg.c, based on your 'base' directory.
 extern uint8_t ospfs_data[];
@@ -539,6 +566,9 @@ ospfs_unlink(struct inode *dirino, struct dentry *dentry)
 	int entry_off;
 	ospfs_direntry_t *od;
 
+	if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+
 	od = NULL; // silence compiler warning; entry_off indicates when !od
 	for (entry_off = 0; entry_off < dir_oi->oi_size;
 	     entry_off += OSPFS_DIRENTRY_SIZE) {
@@ -598,6 +628,9 @@ allocate_block(void)
 	//loads bitmap block
 	void *bitmap = ospfs_block(OSPFS_FREEMAP_BLK);
 
+	if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+
 	//go through bitmap until find a bit that is 1, return bit number
 	for (; k < ospfs_super->os_nblocks; k++)
 	{
@@ -627,6 +660,9 @@ allocate_block(void)
 static void
 free_block(uint32_t blockno)
 {
+	if (check_for_crash(nwrites_to_crash) == -1)
+        return;
+
 	//check valid blockno
 	if (blockno < ospfs_super->os_firstinob + (ospfs_super->os_ninodes / OSPFS_BLKINODES) || blockno > ospfs_super->os_nblocks)
 	{
@@ -787,6 +823,9 @@ add_block(ospfs_inode_t *oi)
 	uint32_t indirect2_indirect_block;
 	uint32_t block;
 
+	if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+
 	//already reached MAXFILEBLKS or invalid n
 	if (n == OSPFS_MAXFILEBLKS)
 	{
@@ -929,6 +968,9 @@ remove_block(ospfs_inode_t *oi)
 	uint32_t n = ospfs_size2nblocks(oi->oi_size);
 	uint32_t *indirec2_block, *indirect2_indirect_block, *indirec_block;
 
+	if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
+
 	//invalid n 
 	if (n > OSPFS_MAXFILEBLKS || n < 0)
 	{
@@ -1033,6 +1075,9 @@ change_size(ospfs_inode_t *oi, uint32_t new_size)
 {
 	uint32_t old_size = oi->oi_size;
 	int r = 0;
+	
+	if (check_for_crash(nwrites_to_crash) == -1)
+        return 0;
 
 	while (ospfs_size2nblocks(oi->oi_size) < ospfs_size2nblocks(new_size)) 
 	{
@@ -1221,6 +1266,9 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
         uint32_t n = OSPFS_BLKSIZE - offset;
 		char *data;
 
+		if (check_for_crash(nwrites_to_crash) == -1)
+        	return 0;
+
 		if (blockno == 0) {
 			retval = -EIO;
 			goto done;
@@ -1316,9 +1364,12 @@ create_blank_direntry(ospfs_inode_t *dir_oi)
 	//    Use ERR_PTR if this fails; otherwise, clear out all the directory
 	//    entries and return one of them.
 
-	ospfs_direntry_t *od;
+	ospfs_direntry_t *od = NULL;
 	int retval;
 	uint32_t k = 0;
+
+	if (check_for_crash(nwrites_to_crash) == -1)
+        	return od;
 
 	// look for empty entry
 	for (; k < dir_oi->oi_size; k += OSPFS_DIRENTRY_SIZE) {
@@ -1369,6 +1420,9 @@ static int
 ospfs_link(struct dentry *src_dentry, struct inode *dir, struct dentry *dst_dentry) {
 	ospfs_inode_t *od = ospfs_inode(dir->i_ino);
 	ospfs_direntry_t* sym;
+
+	if (check_for_crash(nwrites_to_crash) == -1)
+        	return 0;
 
 	//check directory is okay
 	if(od == NULL || od->oi_nlink + 1 == 0 || od->oi_ftype != OSPFS_FTYPE_DIR)
@@ -1435,6 +1489,9 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
 
 	ospfs_direntry_t *od;
 	ospfs_inode_t *oi;
+
+	if (check_for_crash(nwrites_to_crash) == -1)
+        	return 0;
 	
 	// Error, I/O.
     if (dir_oi->oi_nlink + 1 == 0)
@@ -1518,6 +1575,9 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 	uint32_t entry_ino = 2;
 	ospfs_symlink_inode_t *os;
 	ospfs_direntry_t *od;
+
+	if (check_for_crash(nwrites_to_crash) == -1)
+        	return 0;
 
 	//check directory is okay
 	if(dir_oi == NULL || dir_oi->oi_ftype != OSPFS_FTYPE_DIR)
