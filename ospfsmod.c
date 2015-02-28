@@ -557,7 +557,7 @@ ospfs_unlink(struct inode *dirino, struct dentry *dentry)
 	od->od_ino = 0;
 	oi->oi_nlink--;
 
-	//deleting sym links
+	//deleting sym links correctly
 	if (oi->oi_nlink == 0 && oi->oi_ftype != OSPFS_FTYPE_SYMLINK)
 	{
 		return change_size(oi, 0);
@@ -1194,7 +1194,6 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
 	//overflow of *f_pos
 	if (*f_pos + count < *f_pos)
 	{
-		eprintk("overflow in write");
 		return -EIO;
 	}
 
@@ -1223,7 +1222,6 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
 		char *data;
 
 		if (blockno == 0) {
-			eprintk("blockno == 0");
 			retval = -EIO;
 			goto done;
 		}
@@ -1522,7 +1520,7 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 	ospfs_direntry_t *od;
 
 	//check directory is okay
-	if(dir_oi == NULL || dir_oi->oi_nlink + 1 == 0 || dir_oi->oi_ftype != OSPFS_FTYPE_DIR)
+	if(dir_oi == NULL || dir_oi->oi_ftype != OSPFS_FTYPE_DIR)
 		return -EIO;
 
 	//check name length
@@ -1595,7 +1593,6 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 	// If this isn't a conditonal link, set the path and return
 	if(strncmp(oi->oi_symlink, "root?", 5) != 0)
 	{
-		eprintk("not a conditional root\n");
 		nd_set_link(nd, oi->oi_symlink);
 		return (void *) 0;
 	}
@@ -1607,15 +1604,12 @@ ospfs_follow_link(struct dentry *dentry, struct nameidata *nd)
 		if(!offset)
 			offset = &oi->oi_symlink[strlen(oi->oi_symlink)];
 		*offset = '\0';
-		eprintk("current->uid:%d", current->uid);
 		if(current->uid == 0) //root user
 		{
-			eprintk("believes it is root user\n");
 			nd_set_link(nd, oi->oi_symlink + 5);
 		}
 		else //normal user
 		{
-			eprintk("believes it is normal user\n");
 			nd_set_link(nd, offset + 1);
 		}
 		return (void *) 0;
