@@ -31,33 +31,6 @@
  * and KERN_EMERG will make sure that you will see messages.) */
 #define eprintk(format, ...) printk(KERN_NOTICE format, ## __VA_ARGS__)
 
-static int nwrites_to_crash = 0;
-
-// returns 0 when nwrites_to_crash continues as usual (when == -1, >0)
-// returns -1 when the machine should "crash" or otherwise has an error
-//     (when == 0, <-1)
-int check_for_crash (int nwrites_to_crash)
-{
-    eprintk("nwrotes_to_crash is: %d\n", nwrites_to_crash);
-    // continue as usual
-    if (nwrites_to_crash == -1) {
-        return 0;
-    }
-    // the program has crashed, no longer do any more writes
-    else if (nwrites_to_crash == 0) {
-        return -1;
-    }
-    // decrement counter
-    else if (nwrites_to_crash > 0) {
-        nwrites_to_crash--;
-        return 0;
-    }
-    else {
-        eprintk("Invalid number of writes available.\n");
-        return -1;
-    }
-}
-
 // The actual disk data is just an array of raw memory.
 // The initial array is defined in fsimg.c, based on your 'base' directory.
 extern uint8_t ospfs_data[];
@@ -70,6 +43,46 @@ static ospfs_super_t * const ospfs_super =
 static int change_size(ospfs_inode_t *oi, uint32_t want_size);
 static ospfs_direntry_t *find_direntry(ospfs_inode_t *dir_oi, const char *name, int namelen);
 
+#define IOCTL_SET_NWRITES 0
+
+static int nwrites_to_crash = 0;
+
+int ioctl(
+	struct inode *inode,
+    struct file *file,
+    unsigned int ioctl_num,/* The number of the ioctl */
+    unsigned long ioctl_param) /* The parameter to it */
+{
+	if(ioctl_num == IOCTL_SET_NWRITES)
+		nwrites_to_crash = ioctl_param;
+	else
+		return -EINVAL;
+}
+
+// returns 0 when nwrites_to_crash continues as usual (when == -1, >0)
+// returns -1 when the machine should "crash" or otherwise has an error
+//     (when == 0, <-1)
+int check_for_crash()
+{
+    eprintk("nwrotes_to_crash is: %d\n", nwrites_to_crash);
+    // continue as usual
+    if (nwrites_to_crash == -1) {
+        return 1;
+    }
+    // the program has crashed, no longer do any more writes
+    else if (nwrites_to_crash == 0) {
+        return 0;
+    }
+    // decrement counter
+    else if (nwrites_to_crash > 0) {
+        nwrites_to_crash--;
+        return 1;
+    }
+    else {
+        eprintk("nwrite_to_crash < -1.\n");
+        return 0;
+    }
+}
 
 /*****************************************************************************
  * FILE SYSTEM OPERATIONS STRUCTURES
@@ -130,6 +143,8 @@ static struct super_operations ospfs_superblock_ops;
 static inline void
 bitvector_set(void *vector, int i)
 {
+	if(!check_for_crash())
+		return;
 	((uint32_t *) vector) [i / 32] |= (1 << (i % 32));
 }
 
@@ -137,6 +152,8 @@ bitvector_set(void *vector, int i)
 static inline void
 bitvector_clear(void *vector, int i)
 {
+	if(!check_for_crash())
+		return;
 	((uint32_t *) vector) [i / 32] &= ~(1 << (i % 32));
 }
 
@@ -566,7 +583,7 @@ ospfs_unlink(struct inode *dirino, struct dentry *dentry)
 	int entry_off;
 	ospfs_direntry_t *od;
 
-	if (check_for_crash(nwrites_to_crash) == -1)
+	if (!check_for_crash())
         return 0;
 
 	od = NULL; // silence compiler warning; entry_off indicates when !od
@@ -628,9 +645,6 @@ allocate_block(void)
 	//loads bitmap block
 	void *bitmap = ospfs_block(OSPFS_FREEMAP_BLK);
 
-	if (check_for_crash(nwrites_to_crash) == -1)
-        return 0;
-
 	//go through bitmap until find a bit that is 1, return bit number
 	for (; k < ospfs_super->os_nblocks; k++)
 	{
@@ -660,9 +674,6 @@ allocate_block(void)
 static void
 free_block(uint32_t blockno)
 {
-	if (check_for_crash(nwrites_to_crash) == -1)
-        return;
-
 	//check valid blockno
 	if (blockno < ospfs_super->os_firstinob + (ospfs_super->os_ninodes / OSPFS_BLKINODES) || blockno > ospfs_super->os_nblocks)
 	{
@@ -823,7 +834,7 @@ add_block(ospfs_inode_t *oi)
 	uint32_t indirect2_indirect_block;
 	uint32_t block;
 
-	if (check_for_crash(nwrites_to_crash) == -1)
+	if (!check_for_crash())
         return 0;
 
 	//already reached MAXFILEBLKS or invalid n
@@ -968,7 +979,7 @@ remove_block(ospfs_inode_t *oi)
 	uint32_t n = ospfs_size2nblocks(oi->oi_size);
 	uint32_t *indirec2_block, *indirect2_indirect_block, *indirec_block;
 
-	if (check_for_crash(nwrites_to_crash) == -1)
+	if (!check_for_crash())
         return 0;
 
 	//invalid n 
@@ -1076,7 +1087,7 @@ change_size(ospfs_inode_t *oi, uint32_t new_size)
 	uint32_t old_size = oi->oi_size;
 	int r = 0;
 	
-	if (check_for_crash(nwrites_to_crash) == -1)
+	if (!check_for_crash())
         return 0;
 
 	while (ospfs_size2nblocks(oi->oi_size) < ospfs_size2nblocks(new_size)) 
@@ -1266,8 +1277,8 @@ ospfs_write(struct file *filp, const char __user *buffer, size_t count, loff_t *
         uint32_t n = OSPFS_BLKSIZE - offset;
 		char *data;
 
-		if (check_for_crash(nwrites_to_crash) == -1)
-        	return 0;
+		if (!check_for_crash())
+	      	return count;
 
 		if (blockno == 0) {
 			retval = -EIO;
@@ -1368,9 +1379,6 @@ create_blank_direntry(ospfs_inode_t *dir_oi)
 	int retval;
 	uint32_t k = 0;
 
-	if (check_for_crash(nwrites_to_crash) == -1)
-        	return od;
-
 	// look for empty entry
 	for (; k < dir_oi->oi_size; k += OSPFS_DIRENTRY_SIZE) {
 		od = ospfs_inode_data(dir_oi, k);
@@ -1421,7 +1429,7 @@ ospfs_link(struct dentry *src_dentry, struct inode *dir, struct dentry *dst_dent
 	ospfs_inode_t *od = ospfs_inode(dir->i_ino);
 	ospfs_direntry_t* sym;
 
-	if (check_for_crash(nwrites_to_crash) == -1)
+	if (!check_for_crash())
         	return 0;
 
 	//check directory is okay
@@ -1490,7 +1498,7 @@ ospfs_create(struct inode *dir, struct dentry *dentry, int mode, struct nameidat
 	ospfs_direntry_t *od;
 	ospfs_inode_t *oi;
 
-	if (check_for_crash(nwrites_to_crash) == -1)
+	if (!check_for_crash())
         	return 0;
 	
 	// Error, I/O.
@@ -1576,7 +1584,7 @@ ospfs_symlink(struct inode *dir, struct dentry *dentry, const char *symname)
 	ospfs_symlink_inode_t *os;
 	ospfs_direntry_t *od;
 
-	if (check_for_crash(nwrites_to_crash) == -1)
+	if (!check_for_crash())
         	return 0;
 
 	//check directory is okay
@@ -1683,7 +1691,8 @@ static struct file_system_type ospfs_fs_type = {
 	.owner		= THIS_MODULE,
 	.name		= "ospfs",
 	.get_sb		= ospfs_get_sb,
-	.kill_sb	= kill_anon_super
+	.kill_sb	= kill_anon_super,
+	.ioctl 		= ioctl
 };
 
 static struct inode_operations ospfs_reg_inode_ops = {
@@ -1693,7 +1702,8 @@ static struct inode_operations ospfs_reg_inode_ops = {
 static struct file_operations ospfs_reg_file_ops = {
 	.llseek		= generic_file_llseek,
 	.read		= ospfs_read,
-	.write		= ospfs_write
+	.write		= ospfs_write,
+	.ioctl 		= ioctl
 };
 
 static struct inode_operations ospfs_dir_inode_ops = {
