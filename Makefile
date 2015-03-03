@@ -32,7 +32,7 @@ obj-m		+= ospfs.o
 ospfs-objs	:= ospfsmod.o fsimg.o
 BASEFILES	:= $(shell find base 2>/dev/null | grep -v '[ 	]')
 
-ospfs.ko all: fsimg.c truncate always
+ospfs.ko all: fsimg.c truncate always ioctl
 	$(MAKE) -C $(KERNELPATH) M=$(shell pwd) modules
 
 install: ospfs.ko
@@ -93,3 +93,6 @@ realclean: clean
 	$(V)-rm -rf $(DISTDIR) $(DISTDIR).tar.gz labstuff.tgz
 
 .PHONY: all always clean distclean distdir dist tarball install
+
+ioctl: ioctl.c
+	$(CC) -g ioctl.c -o setnwrite

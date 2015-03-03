@@ -45,16 +45,20 @@ static ospfs_direntry_t *find_direntry(ospfs_inode_t *dir_oi, const char *name, 
 
 #define IOCTL_SET_NWRITES 0
 
-static int nwrites_to_crash = 0;
+static int nwrites_to_crash = -1;
 
-int ioctl(
+int device_ioctl(
 	struct inode *inode,
     struct file *file,
     unsigned int ioctl_num,/* The number of the ioctl */
     unsigned long ioctl_param) /* The parameter to it */
 {
 	if(ioctl_num == IOCTL_SET_NWRITES)
+	{
+		eprintk("nwrites_to_crash was %d and is now %u\n",nwrites_to_crash,ioctl_param);
 		nwrites_to_crash = ioctl_param;
+		return 0;
+	}
 	else
 		return -EINVAL;
 }
@@ -62,9 +66,9 @@ int ioctl(
 // returns 0 when nwrites_to_crash continues as usual (when == -1, >0)
 // returns -1 when the machine should "crash" or otherwise has an error
 //     (when == 0, <-1)
-int check_for_crash()
+int check_for_crash(void)
 {
-    eprintk("nwrotes_to_crash is: %d\n", nwrites_to_crash);
+    eprintk("nwrites_to_crash is: %d\n", nwrites_to_crash);
     // continue as usual
     if (nwrites_to_crash == -1) {
         return 1;
@@ -1692,7 +1696,6 @@ static struct file_system_type ospfs_fs_type = {
 	.name		= "ospfs",
 	.get_sb		= ospfs_get_sb,
 	.kill_sb	= kill_anon_super,
-	.ioctl 		= ioctl
 };
 
 static struct inode_operations ospfs_reg_inode_ops = {
@@ -1703,7 +1706,7 @@ static struct file_operations ospfs_reg_file_ops = {
 	.llseek		= generic_file_llseek,
 	.read		= ospfs_read,
 	.write		= ospfs_write,
-	.ioctl 		= ioctl
+	.ioctl 		= device_ioctl
 };
 
 static struct inode_operations ospfs_dir_inode_ops = {
@@ -1716,7 +1719,8 @@ static struct inode_operations ospfs_dir_inode_ops = {
 
 static struct file_operations ospfs_dir_file_ops = {
 	.read		= generic_read_dir,
-	.readdir	= ospfs_dir_readdir
+	.readdir	= ospfs_dir_readdir,
+	.ioctl 		= device_ioctl
 };
 
 static struct inode_operations ospfs_symlink_inode_ops = {
