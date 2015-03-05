@@ -68,7 +68,6 @@ int device_ioctl(
 //     (when == 0, <-1)
 int check_for_crash(void)
 {
-    eprintk("nwrites_to_crash is: %d\n", nwrites_to_crash);
     // continue as usual
     if (nwrites_to_crash == -1) {
         return 1;
