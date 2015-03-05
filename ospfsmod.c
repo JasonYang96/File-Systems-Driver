@@ -55,7 +55,7 @@ int device_ioctl(
 {
 	if(ioctl_num == IOCTL_SET_NWRITES)
 	{
-		eprintk("nwrites_to_crash was %d and is now %u\n",nwrites_to_crash,ioctl_param);
+		eprintk("nwrites_to_crash was %d and is now %lu\n",nwrites_to_crash,ioctl_param);
 		nwrites_to_crash = ioctl_param;
 		return 0;
 	}
@@ -838,9 +838,6 @@ add_block(ospfs_inode_t *oi)
 	uint32_t indirect2_indirect_block;
 	uint32_t block;
 
-	if (!check_for_crash())
-        return 0;
-
 	//already reached MAXFILEBLKS or invalid n
 	if (n == OSPFS_MAXFILEBLKS)
 	{
@@ -983,9 +980,6 @@ remove_block(ospfs_inode_t *oi)
 	uint32_t n = ospfs_size2nblocks(oi->oi_size);
 	uint32_t *indirec2_block, *indirect2_indirect_block, *indirec_block;
 
-	if (!check_for_crash())
-        return 0;
-
 	//invalid n 
 	if (n > OSPFS_MAXFILEBLKS || n < 0)
 	{
@@ -1090,12 +1084,12 @@ change_size(ospfs_inode_t *oi, uint32_t new_size)
 {
 	uint32_t old_size = oi->oi_size;
 	int r = 0;
-	
-	if (!check_for_crash())
-        return 0;
 
 	while (ospfs_size2nblocks(oi->oi_size) < ospfs_size2nblocks(new_size)) 
 	{
+		if (!check_for_crash())
+        	return r;
+
 		r = add_block(oi);
 		if (r == -EIO)
 		{
@@ -1109,6 +1103,8 @@ change_size(ospfs_inode_t *oi, uint32_t new_size)
 	}
 	while (ospfs_size2nblocks(oi->oi_size) > ospfs_size2nblocks(new_size)) 
 	{
+		if (!check_for_crash())
+        	return r;
 		r = remove_block(oi);
 		if (r == -EIO)
 		{
